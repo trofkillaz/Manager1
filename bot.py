@@ -10,8 +10,8 @@ from telegram.ext import (
 )
 
 TOKEN = os.getenv("8430851059:AAFeU-6EGQYjQsv8DqnV0G8gwrOJdcyHjkw")
-TECH_GROUP_ID = int(os.getenv("-1003726782924"))
-MANAGER_GROUP_ID = int(os.getenv("-5285917843"))
+TECH_GROUP_ID = -1003726782924
+MANAGER_GROUP_ID = -5285917843
 
 logging.basicConfig(level=logging.INFO)
 
