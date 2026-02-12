@@ -29,7 +29,7 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 ) = range(4)
 
 
-# ================= CONFIG FLOW =================
+# ================= КОНФИГУРАЦИЯ =================
 
 CONFIG_FLOW = [
     ("helmet", "Шлем", ["1 шлем", "2 шлема"]),
@@ -43,7 +43,7 @@ CONFIG_FLOW = [
 ]
 
 
-# ================= CHECK BOOKINGS =================
+# ================= ПРОВЕРКА НОВЫХ ЗАЯВОК =================
 
 async def check_bookings(context: ContextTypes.DEFAULT_TYPE):
     keys = await redis_client.keys("booking:*")
@@ -59,34 +59,35 @@ async def check_bookings(context: ContextTypes.DEFAULT_TYPE):
 
             text = (
                 f"🆕 Новая заявка\n\n"
-                f"🛵 {data.get('scooter')}\n"
-                f"📆 {data.get('days')} дней\n"
-                f"💰 {data.get('total')} VND\n\n"
-                f"👤 {data.get('name')}\n"
-                f"🏨 {data.get('hotel')}\n"
-                f"🚪 {data.get('room')}\n"
-                f"📞 {data.get('contact')}\n"
-                f"📊 {data.get('risk_level')}"
+                f"🛵 {data['scooter']}\n"
+                f"📆 {data['days']} дней\n"
+                f"💵 {data['total']} VND\n\n"
+                f"👤 {data['name']}\n"
+                f"🏨 {data['hotel']} | {data['room']}\n"
+                f"📞 {data['contact']}\n"
+                f"📊 {data['risk_level']}"
             )
 
             keyboard = [[
                 InlineKeyboardButton(
                     "🟡 Принять заявку",
-                    callback_data=f"accept:{data.get('booking_id')}"
+                    callback_data=f"accept:{data['booking_id']}"
                 )
             ]]
 
-            await context.bot.send_message(
+            msg = await context.bot.send_message(
                 chat_id=GROUP_CHAT_ID,
                 text=text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
             data["status"] = "sent"
+            data["group_message_id"] = msg.message_id
+
             await redis_client.set(key, json.dumps(data))
 
 
-# ================= ACCEPT =================
+# ================= ПРИНЯТИЕ ЗАЯВКИ =================
 
 async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -97,13 +98,12 @@ async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     raw = await redis_client.get(key)
     if not raw:
-        await query.edit_message_text("❌ Заявка не найдена")
         return ConversationHandler.END
 
     data = json.loads(raw)
 
     if data.get("status") != "sent":
-        await query.answer("⚠ Уже обработана", show_alert=True)
+        await query.answer("Уже обработана", show_alert=True)
         return ConversationHandler.END
 
     data["status"] = "in_progress"
@@ -121,7 +121,7 @@ async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CONFIG
 
 
-# ================= SEND CONFIG STEP =================
+# ================= ОТПРАВКА ШАГА =================
 
 async def send_config_step(query, context):
     step = context.user_data["config_step"]
@@ -138,7 +138,7 @@ async def send_config_step(query, context):
     )
 
 
-# ================= HANDLE CONFIG =================
+# ================= ОБРАБОТКА КОНФИГА =================
 
 async def handle_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -148,7 +148,11 @@ async def handle_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key_name, _, _ = CONFIG_FLOW[step]
 
     value = query.data.split(":")[1]
-    context.user_data["config"][key_name] = value
+
+    # если выбрано "Нет" — НЕ сохраняем
+    if value not in ["Нет", "Грязный", "Неполный"]:
+        context.user_data["config"][key_name] = value
+
     context.user_data["config_step"] += 1
 
     if context.user_data["config_step"] >= len(CONFIG_FLOW):
@@ -159,19 +163,14 @@ async def handle_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CONFIG
 
 
-# ================= DEPOSIT =================
+# ================= ДЕПОЗИТ =================
 
 async def deposit_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    deposit = update.message.text
-
-    if not deposit.isdigit():
-        await update.message.reply_text("Введите сумму цифрами.")
-        return DEPOSIT
-
-    context.user_data["deposit"] = deposit
+    deposit = update.message.text.strip()
 
     booking_id = context.user_data["booking_id"]
     key = f"booking:{booking_id}"
+
     raw = await redis_client.get(key)
     data = json.loads(raw)
 
@@ -181,7 +180,7 @@ async def deposit_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await redis_client.set(key, json.dumps(data))
 
     summary = "\n".join(
-        [f"{k}: {v}" for k, v in data["equipment"].items()]
+        [f"{v}" for v in data["equipment"].values()]
     )
 
     keyboard = [[InlineKeyboardButton("✅ Подтвердить", callback_data="final")]]
@@ -190,14 +189,14 @@ async def deposit_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 Проверка заявки\n\n"
         f"{summary}\n\n"
         f"💰 Депозит: {deposit}\n"
-        f"💵 Итого аренда: {data['total']}",
+        f"💵 Аренда: {data['total']} VND",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
     return FINAL
 
 
-# ================= FINAL =================
+# ================= ФИНАЛ =================
 
 async def final_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -213,7 +212,7 @@ async def final_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PAYMENT
 
 
-# ================= PAYMENT =================
+# ================= ОПЛАТА =================
 
 async def payment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -228,24 +227,35 @@ async def payment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data["status"] = "confirmed"
     await redis_client.set(key, json.dumps(data))
 
-    summary = "\n".join(
-        [f"{k}: {v}" for k, v in data["equipment"].items()]
+    equipment_lines = "\n".join(
+        [f"{v}" for v in data["equipment"].values()]
     )
 
+    full_text = (
+        "✅ Заявка завершена\n\n"
+        f"🛵 {data['scooter']}\n"
+        f"📆 {data['days']} дней\n"
+        f"💵 {data['total']} VND\n"
+        f"💰 Депозит: {data['deposit']}\n\n"
+        f"{equipment_lines}\n\n"
+        f"👤 {data['name']}\n"
+        f"🏨 {data['hotel']} | {data['room']}\n"
+        f"📞 {data['contact']}\n\n"
+        f"👨‍💼 @{data['manager_username']}"
+    )
+
+    # Обновляем сообщение в группе
+    await context.bot.edit_message_text(
+        chat_id=GROUP_CHAT_ID,
+        message_id=data["group_message_id"],
+        text=full_text
+    )
+
+    # Отправляем клиенту
     await context.bot.send_message(
         chat_id=int(data["client_id"]),
-        text=(
-            "✅ Заявка принята\n\n"
-            f"🛵 {data['scooter']}\n"
-            f"📆 {data['days']} дней\n"
-            f"💵 Аренда: {data['total']} VND\n"
-            f"💰 Депозит: {data['deposit']}\n\n"
-            f"{summary}\n\n"
-            f"👨‍💼 Менеджер: @{data['manager_username']}"
-        )
+        text=full_text
     )
-
-    await query.edit_message_text("✅ Оплата подтверждена. Заявка завершена.")
 
     return ConversationHandler.END
 
