@@ -16,8 +16,8 @@ from telegram.ext import (
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-REDIS_1 = os.getenv("REDIS_1")  # booking
-REDIS_2 = os.getenv("REDIS_2")  # events
+REDIS_1 = os.getenv("REDIS_1")
+REDIS_2 = os.getenv("REDIS_2")
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID"))
 
 redis_booking = redis.from_url(REDIS_1, decode_responses=True)
@@ -30,7 +30,7 @@ redis_event = redis.from_url(REDIS_2, decode_responses=True)
     PAYMENT
 ) = range(4)
 
-# ================= КОНФИГУРАЦИЯ =================
+# ================= КОНФИГ =================
 
 CONFIG_FLOW = [
     ("helmet", "Шлем", ["1 шлем", "2 шлема"]),
@@ -43,12 +43,10 @@ CONFIG_FLOW = [
     ("pillow", "Подушка", ["Да", "Нет"]),
 ]
 
-# ================= ПРОВЕРКА НОВЫХ ЗАЯВОК =================
+# ================= ПРОВЕРКА НОВЫХ =================
 
 async def check_bookings(context: ContextTypes.DEFAULT_TYPE):
-    keys = await redis_booking.keys("booking:*")
-
-    for key in keys:
+    async for key in redis_booking.scan_iter("booking:*"):
         raw = await redis_booking.get(key)
         if not raw:
             continue
@@ -70,14 +68,8 @@ async def check_bookings(context: ContextTypes.DEFAULT_TYPE):
         )
 
         keyboard = [[
-            InlineKeyboardButton(
-                "🟢 Принять",
-                callback_data=f"accept:{data['booking_id']}"
-            ),
-            InlineKeyboardButton(
-                "🔴 Отказать",
-                callback_data=f"reject:{data['booking_id']}"
-            )
+            InlineKeyboardButton("🟢 Принять", callback_data=f"accept:{data['booking_id']}"),
+            InlineKeyboardButton("🔴 Отказать", callback_data=f"reject:{data['booking_id']}")
         ]]
 
         msg = await context.bot.send_message(
@@ -88,7 +80,8 @@ async def check_bookings(context: ContextTypes.DEFAULT_TYPE):
 
         data["status"] = "sent"
         data["group_message_id"] = msg.message_id
-        await redis_booking.set(key, json.dumps(data))
+
+        await redis_booking.set(key, json.dumps(data), ex=60 * 60 * 24)
 
 # ================= ОТКАЗ =================
 
@@ -105,7 +98,8 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = json.loads(raw)
     data["status"] = "rejected"
-    await redis_booking.set(key, json.dumps(data))
+
+    await redis_booking.set(key, json.dumps(data), ex=60 * 60 * 24)
 
     await context.bot.edit_message_text(
         chat_id=GROUP_CHAT_ID,
@@ -113,14 +107,14 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text="❌ Заявка отклонена"
     )
 
-    # событие клиенту
     await redis_event.set(
         f"event:{booking_id}",
         json.dumps({
             "type": "booking_update",
             "booking_id": booking_id,
             "status": "rejected"
-        })
+        }),
+        ex=60 * 60 * 24
     )
 
 # ================= ПРИНЯТИЕ =================
@@ -138,13 +132,15 @@ async def accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = json.loads(raw)
 
-    if data.get("status") not in ["sent"]:
+    if data.get("status") != "sent":
         return ConversationHandler.END
 
     data["status"] = "in_progress"
-    data["manager_username"] = update.effective_user.username
-    await redis_booking.set(key, json.dumps(data))
+    data["manager_username"] = update.effective_user.username or "manager"
 
+    await redis_booking.set(key, json.dumps(data), ex=60 * 60 * 24)
+
+    context.user_data.clear()
     context.user_data["booking_id"] = booking_id
     context.user_data["config_step"] = 0
     context.user_data["equipment"] = {}
@@ -168,18 +164,18 @@ async def send_config_step(query, context):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ================= ОБРАБОТКА КОНФИГА =================
+# ================= ОБРАБОТКА =================
 
 async def handle_config(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     step = context.user_data["config_step"]
-    key_name, _, _ = CONFIG_FLOW[step]
+    key_name, title, _ = CONFIG_FLOW[step]
     value = query.data.split(":")[1]
 
     if value not in ["Нет", "Неполный", "Грязный"]:
-        context.user_data["equipment"][key_name] = value
+        context.user_data["equipment"][title] = value
 
     context.user_data["config_step"] += 1
 
@@ -203,9 +199,12 @@ async def deposit_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data["equipment"] = context.user_data["equipment"]
     data["deposit"] = deposit
-    await redis_booking.set(key, json.dumps(data))
 
-    equipment_text = "\n".join(data["equipment"].values())
+    await redis_booking.set(key, json.dumps(data), ex=60 * 60 * 24)
+
+    equipment_text = "\n".join(
+        [f"• {v}" for v in data["equipment"].values()]
+    )
 
     keyboard = [[InlineKeyboardButton("✅ Подтвердить", callback_data="final")]]
 
@@ -254,9 +253,12 @@ async def payment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = json.loads(raw)
 
     data["status"] = "confirmed"
-    await redis_booking.set(key, json.dumps(data))
 
-    equipment_text = "\n".join(data.get("equipment", {}).values())
+    await redis_booking.set(key, json.dumps(data), ex=60 * 60 * 24)
+
+    equipment_text = "\n".join(
+        [f"• {v}" for v in data.get("equipment", {}).values()]
+    )
 
     full_text = (
         "✅ Заявка завершена\n\n"
@@ -277,7 +279,6 @@ async def payment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=full_text
     )
 
-    # событие клиенту
     await redis_event.set(
         f"event:{booking_id}",
         json.dumps({
@@ -287,7 +288,8 @@ async def payment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "deposit": data["deposit"],
             "final_total": data["total"],
             "manager": f"@{data['manager_username']}"
-        })
+        }),
+        ex=60 * 60 * 24
     )
 
     return ConversationHandler.END
