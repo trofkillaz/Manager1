@@ -20,7 +20,6 @@ active_bookings = {}
 booking_extras = {}
 booking_managers = {}
 
-
 # ===============================
 # Приём заявки из TECH группы
 # ===============================
@@ -29,7 +28,7 @@ async def receive_from_tech(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = update.message.text
-    if not text.startswith("NEW_BOOKING"):
+    if not text or not text.startswith("NEW_BOOKING"):
         return
 
     lines = text.split("\n")
@@ -120,14 +119,14 @@ async def handle_extras(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     extra_text = extra_map.get(action)
 
-    if extra_text and extra_text not in booking_extras[booking_id]:
+    if extra_text and extra_text not in booking_extras.get(booking_id, []):
         booking_extras[booking_id].append(extra_text)
 
-    extras = "\n".join(booking_extras[booking_id]) or "Нет"
+    extras = "\n".join(booking_extras.get(booking_id, [])) or "Нет"
 
     await query.edit_message_text(
         f"🔧 Работа с заявкой {booking_id}\n"
-        f"👤 Менеджер: {booking_managers[booking_id]}\n\n"
+        f"👤 Менеджер: {booking_managers.get(booking_id)}\n\n"
         f"📦 Комплектация:\n{extras}",
         reply_markup=query.message.reply_markup
     )
@@ -152,6 +151,19 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===============================
+# Ответ в личке / других чатах
+# ===============================
+async def reply_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id == TECH_GROUP_ID:
+        return
+
+    await update.message.reply_text(
+        "🤖 Я не тот бот, который тебе нужен.\n"
+        "Этот бот работает только для обработки заявок."
+    )
+
+
+# ===============================
 # Запуск
 # ===============================
 if __name__ == "__main__":
@@ -161,6 +173,9 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(take_booking, pattern="^take_"))
     app.add_handler(CallbackQueryHandler(handle_extras, pattern="^extra_"))
     app.add_handler(CallbackQueryHandler(confirm_booking, pattern="^confirm_"))
+
+    # добавляем последним
+    app.add_handler(MessageHandler(filters.TEXT, reply_any_message))
 
     print("Manager bot started...")
     app.run_polling()
