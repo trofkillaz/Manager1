@@ -9,7 +9,7 @@ from telegram.ext import (
     filters,
 )
 
-TOKEN = os.getenv("8430851059:AAFeU-6EGQYjQsv8DqnV0G8gwrOJdcyHjkw")
+TOKEN = os.getenv("8430851059:AAEMQ2tu0asXkglKNz_s54diwKcPYzab9mI")
 TECH_GROUP_ID = -1003726782924
 MANAGER_GROUP_ID = -5285917843
 
