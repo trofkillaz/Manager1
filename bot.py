@@ -10,6 +10,8 @@ load_dotenv()
 
 REDIS_1 = os.getenv("REDIS_1")
 REDIS_2 = os.getenv("REDIS_2")
+BOT_TOKEN = os.getenv("MANAGER_BOT_TOKEN")
+GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID"))
 
 redis_booking = redis.from_url(
     REDIS_1,
