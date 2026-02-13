@@ -8,20 +8,16 @@ import redis.asyncio as redis
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("MANAGER_BOT_TOKEN")
-GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID"))
+REDIS_1 = os.getenv("REDIS_1")
+REDIS_2 = os.getenv("REDIS_2")
 
-redis_booking = redis.Redis(
-    host=os.getenv("REDIS_HOST"),
-    port=int(os.getenv("REDIS_PORT")),
-    db=int(os.getenv("REDIS_DB_BOOKING")),
+redis_booking = redis.from_url(
+    REDIS_1,
     decode_responses=True
 )
 
-redis_events = redis.Redis(
-    host=os.getenv("REDIS_HOST"),
-    port=int(os.getenv("REDIS_PORT")),
-    db=int(os.getenv("REDIS_DB_EVENTS")),
+redis_events = redis.from_url(
+    REDIS_2,
     decode_responses=True
 )
 
